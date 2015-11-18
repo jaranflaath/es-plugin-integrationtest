@@ -8,6 +8,10 @@ import org.elasticsearch.rest.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
 import static org.elasticsearch.rest.RestRequest.Method.GET;
 import static org.elasticsearch.rest.RestStatus.OK;
 
@@ -18,22 +22,30 @@ public class PluginRestEndpoint extends BaseRestHandler {
     private Client client;
 
     @Inject
-    public PluginRestEndpoint(Settings settings, RestController restController, Client client){
+    public PluginRestEndpoint(Settings settings, RestController restController, Client client) {
         super(settings, restController, client);
         this.client = client;
         restController.registerHandler(GET, PATH, this);
     }
 
     @Override
-    public void handleRequest(final RestRequest request, final RestChannel channel, Client client) {
-        String response = null;
-        try {
-            ClusterHealthResponse clusterIndexHealths = client.admin().cluster().prepareHealth().execute().get();
-            response = clusterIndexHealths.getStatus().name();
-        } catch (Exception e) {
-            logger.error("Failed to get cluster status.", e);
-            response = e.getMessage();
+    public void handleRequest(final RestRequest request, final RestChannel channel, final Client client) throws Exception {
+
+        Future<ClusterHealthResponse> future = Executors.newSingleThreadExecutor()
+                .submit(new Callable<ClusterHealthResponse>() {
+                    public ClusterHealthResponse call() throws Exception {
+                        try {
+                            return client.admin().cluster().prepareHealth().execute().get();
+                        } catch (Exception e) {
+                            logger.error("Failed to get cluster status.", e);
+                            return null;
+                        }
+                    }
+                });
+
+        while(!future.isDone()) {
+            Thread.sleep(10);
         }
-        channel.sendResponse(new BytesRestResponse(OK, response));
+        channel.sendResponse(new BytesRestResponse(OK, future.get().getStatus().name()));
     }
 }
